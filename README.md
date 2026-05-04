@@ -13,6 +13,44 @@ $ bitbake-getvar <variable name>                # 변수 값 출력
 $ bitbake-layers show-appends                   # 모든 레시피 확장 목록 조회
 $ bitbake-layers flatten <output directory>     # 여러 레이어에서 사용된 메타데이터들을 단일 계층 디렉토리화 하여 보여준다.
 
+[devshell]
+$ bitbake <recipe name> -c devshell
+- build에 필요한 환경 변수까지 같이 load 됨
+- kernel의 경우 devshell에서 bitbake 명령어 없이, make로 제어 가능
+
+[u-boot]
+<devshell>
+$ bitbake -c devshell u-boot
+
+[kernel]
+<devshell>
+$ bitbake virtual/kernel -c devshell
+
+<search kernel source path>
+$ bitbake-getvar -r <kernel-recipe name> STAGING_KERNEL_DIR
+$ bitbake-getvar -r virtual/kernel STAGING_KERNEL_DIR
+
+<menuconfig>
+$ bitbake -c menuconfig <kernel-recipe name>
+$ bitbake -c menuconfig virtual/kernel
+
+<configure>
+$ bitbake -c kernel_configme <kernel-recipe name>
+$ bitbake -c kernel_configme virtual/kernel
+
+<savedefconfig>
+$ bitbake -c savedefconfig <kernel-recipe name>
+$ bitbake -c savedefconfig virtual/kernel
+
+<diffconfig>
+$ bitbake -c diffconfig virtual/kernel
+
+<.config 무결성을 검증>
+$ bitbake -c kernel_configcheck -f virtual/kernel
+- 비정상적인 옵션 탐지: 존재하지 않는 커널 옵션을 설정했는지 확인.
+- 의존성 누락 확인: 특정 옵션을 활성화(=y)했지만, 그 옵션이 필요로 하는 상위 옵션이 꺼져 있어 실제 결과물(.config)에서 누락된 경우.
+- 중복 및 충돌 탐지: 여러 설정 파일에서 동일한 옵션을 서로 다르게 정의했을 경우.
+
 [example]
 $ bitbake core-image-minimal
 $ bitbake core-image-minimal -C rootfs
@@ -59,6 +97,7 @@ CACHE  = "${TMPDIR}/cache"  : metadata 분석 결과
 STAMP  = "${TMPDIR}/stamps" : 각 task 완료 시 생성되는 파일로 재빌드 여부를 결정 할 때 사용
 T      = "${TMPDIR}/temp"   : 임시 생성 파일
 B      = "${TMPDIR}/${PN}"  : recipe build 과정에서 함수를 실행하는 디렉토리를 가리킴.
+S      = "${TMPDIR}/${PN}"  : 소스 코드가 있는 곳.
 ```
 
 ## Build Sequence
@@ -420,4 +459,276 @@ remove>
 
 [meta-nano-editor/recipes-core/images/core-image-minimal.bbappend]
 # IMAGE_INSTALL += "nano"
+```
+
+## 대체 패키지 생성에 따른 의존성 처리
+```
+copy layers/meta-helloworld/recipes-helloworld
+--> layers/meta-helloworld/recipes-helloworld-ng
+
+rename layers/meta-helloworld/recipes-helloworld-ng/helloworld.bb
+--> layers/meta-helloworld/recipes-helloworld-ng/helloworld-ng.bb
+
+...
+modify
+SRC_URI "\
+    file://helloworld.c
+    ...
+    "
+-->
+SRC_URI "\
+    file://helloworld-ng.c
+    ...
+    "
+
+Add
+...
+RREPLACES:${PN} = "helloworld"
+RPROVIDES:${PN} = "helloworld"
+RCONFLICTS:${PN} = "helloworld"
+...
+
+Add BBMASK
+[build/conf/local.conf]
+...
+# BBMASK is used to exclude certain layers or recipes from the build.
+# This can be useful if you have multiple layers that contain recipes with the same name
+# and you want to ensure that only one of them is used in the build.
+# By adding a layer or recipe to BBMASK, you are telling BitBake to ignore it during the build process.
+BBMASK = "\
+    ../layers/meta-helloworld/recipes-helloworld/ \
+    "
+
+[command]
+bitbake helloworld-ng
+bitbake -C rootfs
+```
+
+## Custom BSP Layer
+```
+REF>
+[poky/meta/conf/machine]
+- qemuarm64.conf
+
+[layers/meta-practice-bsp]
+├── conf
+│   ├── layer.conf
+│   └── machine
+│       └── practice.conf
+├── LICENSE
+├── README.md
+└── recipes-kernel
+    └── linux
+        ├── file
+        └── linux-yocto_5.15.bbappend
+```
+
+## Add Fragment Config & Patches
+```
+
+[layers/meta-practice-bsp/recipes-kernel/linux/linux-yocto_5.15.bbappend]
+...
+# fragment configs
+SRC_URI += "\
+    file://enable_ext3_fs.cfg \
+    file://enable_practice.cfg \
+    "
+
+# patches
+SRC_URI += "\
+    file://0001-Add-practice-driver-for-build-system-testing.patch \
+    "
+
+# add the path to the kernel config fragments and patches
+FILESEXTRAPATHS:prepend := "${THISDIR}/file:"
+```
+
+## internal console
+```
+# allows the interactive session to run within your existing terminal.
+OE_TERMINAL = "tmux"
+```
+
+## kernel metadata
+```
+[linux-yocto.inc]
+- inherit kernel.bbclass, kernel-yocto.bbclass
+
+<required>
+KMACHINE:
+- About BSP Layer
+
+KBRANCH:
+- git branch
+
+<optional>
+KERNEL_FEATURES:
+- TODO
+
+LINUX_KERNEL_TYPE(=> KTYPE):
+- standard
+- tiny
+- preempt-rt
+
+<metadata>
+- scc(Serial Configuration Control) description(.scc)
+  > define: variable define
+  > kconf: fragment config file
+  > patch: patch file
+  > include: include file
+- environment setting fragment(.cfg)
+- patch(.patch)
+```
+
+## non linux-yocto
+```
+[layers/meta-practice-bsp/conf/machine/practice.conf]
+...
+PREFERRED_PROVIDER_virtual/kernel = "linux-practice"
+...
+
+[layers/meta-practice-bsp/recipes-kernel/linux/file/defconfig]
+- from .config
+
+[layers/meta-practice-bsp/recipes-kernel/linux/linux-practice.bb]
+DESCRIPTION = "Linux kernel from kernel.org git repository"
+SECTION = "kernel"
+LICENSE = "GPLv2"
+
+inherit kernel
+inherit kernel-yocto
+
+# branch, name, tag and nocheckout are passed to git fetcher
+SRC_URI = "git://github.com/practice-yocto/linux.git;protocol=https;branch=v5.15/dev"
+LIC_FILES_CHKSUM = "file://COPYING;md5=6bc538ed5bd9a7fc9398086aedcd7e46"
+
+# SRCREV is the commit hash to fetch. It can be overridden by the user when building the image, e.g.:
+# SRCREV = "8bb7eca972ad531c9b149c0a51ab43a417385813"
+SRCREV = "${AUTOREV}"
+
+# defconfig file to be used for the kernel build
+SRC_URI += "file://defconfig "
+
+# SCC
+SRC_URI += "\
+    file://practice-kernel.scc \
+    "
+
+LINUX_VERSION ?= "5.15"
+LINUX_VERSION_EXTENSION ?= "-practice"
+
+# SRCPV: ${GIT_COMMIT} truncated to 7 characters
+PROVIDES += "virtual/kernel"
+PV = "${LINUX_VERSION}+git${SRCPV}"
+COMPATIBLE_MACHINE = "practice"
+
+FILESEXTRAPATHS:prepend := "${THISDIR}/file:"
+
+$ bitbake linux-practice -C fetch
+$ bitbake practice-image -C rootfs
+$ runqemu practice-image nographic
+```
+
+## external kernel source
+```
+[layers/meta-practice-bsp/append/linux-practice.bbappend]
+# This bbappend file is used to modify the linux-practice recipe to use the kernel source from the externalsrc layer.
+inherit externalsrc
+
+# We want to use the kernel source from the externalsrc layer, so we set EXTERNALSRC to point to it.
+EXTERNALSRC = "${COREBASE}/../externalsrc/kernel-source"
+
+[layers/meta-practice-bsp/conf/layer.conf]
+...
+BBFILES += "\
+    ...
+    ${LAYERDIR}/append/*.bbappend \
+    ${LAYERDIR}/append/*/*.bbappend \
+    "
+...
+```
+
+## using defconfig in kernel source
+```
+[layers/meta-practice-bsp/recipes-kernel/linux/linux-practice.bb]
+...
+# It is copied to the kernel source directory and used as the default configuration for the kernel build.
+KBUILD_DEFCONFIG = "practice_defconfig"
+...
+```
+
+## external kernel module
+```
+[layers/meta-practice-bsp/recipes-practice-kernel-module]
+├── file
+│   ├── COPYING
+│   ├── Makefile
+│   └── practice-kernel-module.c
+└── practice-kernel-module.bb
+
+[layers/meta-practice-bsp/recipes-practice-kernel-module/practice-kernel-module.bb]
+SUMMARY = "Example of how to build an external linux kernel module"
+LICENSE = "MIT"
+LIC_FILES_CHKSUM = "file://COPYING;md5=c7e03b2484dde1e8b91e76aa5e668f8f"
+
+inherit module
+
+SRC_URI = "\
+    file://practice-kernel-module.c \
+    file://Makefile \
+    file://COPYING \
+    "
+
+KERNEL_MODULE_AUTOLOAD += "practice-kernel-module"
+S = "${WORKDIR}"
+ALLOW_EMPTY_${PN} = "1"
+FILESEXTRAPATHS:prepend := "${THISDIR}/file:"
+
+[layers/meta-practice/recipes-core/image/practice-image.bb]
+...
+IMAGE_INSTALL += "packagegroup-practice"
+...
+
+$ bitbake practice-kernel-module
+$ bitbake practice-image -C rootfs
+
+MACHINE_EXTRA_RDEPENDS
+- 부팅 시 필수적으로 사용되는 패키지가 아닐때.
+MACHINE_ESSENTIAL_EXTRA_RDEPENDS
+- 부팅 시 필수적으로 사용되는 패키지 일때.
+
+[layers/meta-practice/recipes-core/image/practice-image.bb]
+...
+# IMAGE_INSTALL += "practice-kernel-module"
+...
+
+[layers/meta-practice-bsp/conf/machine/practice.conf]
+...
+# MACHINE_ESSENTIAL_EXTRA_RDEPENDS += "kernel-module-<module name>"
+MACHINE_ESSENTIAL_EXTRA_RDEPENDS += "kernel-module-practice-kernel-module"
+...
+
+[layers/meta-practice-bsp/recipes-practice-kernel-module/practice-kernel-module.bb]
+...
+RPROVIDES:${PN} += "kernel-module-practice-kernel-module"
+...
+
+<module>
+root@practice:~# cat /etc/modules-load.d/practice-kernel-module.conf
+practice-kernel-module
+
+root@practice:~# systemctl status systemd-modules-load
+* systemd-modules-load.service - Load Kernel Modules
+     Loaded: loaded (/lib/systemd/system/systemd-modules-load.service; static)
+     Active: active (exited) since Mon 2026-05-04 12:01:12 UTC; 15s ago
+       Docs: man:systemd-modules-load.service(8)
+             man:modules-load.d(5)
+    Process: 133 ExecStart=/lib/systemd/systemd-modules-load (code=exited, status=0/SUCCESS)
+   Main PID: 133 (code=exited, status=0/SUCCESS)
+
+Notice: journal has been rotated since unit was started, output may be incomplete.
+
+- /etc/modules-load.d/*.conf
+- /run/modules-load.d/*.conf
+- /usr/lib/modules-load.d/*.conf
 ```
