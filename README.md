@@ -98,6 +98,7 @@ STAMP  = "${TMPDIR}/stamps" : 각 task 완료 시 생성되는 파일로 재빌�
 T      = "${TMPDIR}/temp"   : 임시 생성 파일
 B      = "${TMPDIR}/${PN}"  : recipe build 과정에서 함수를 실행하는 디렉토리를 가리킴.
 S      = "${TMPDIR}/${PN}"  : 소스 코드가 있는 곳.
+WORKDIR = "build/tmp/work/<architecture>/<recipe-name>/<version>-<release>/" : 특정 레시피의 모든 작업이 이루어지는 전용 임시 공간을 의미
 ```
 
 ## Build Sequence
@@ -731,4 +732,42 @@ Notice: journal has been rotated since unit was started, output may be incomplet
 - /etc/modules-load.d/*.conf
 - /run/modules-load.d/*.conf
 - /usr/lib/modules-load.d/*.conf
+```
+
+## 배포(distribution) 레이어
+```
+format> '<distribution layer>/distro/<distro name>.conf'
+--> meta-poky/conf/distro
+```
+
+## Customer 레이어
+```
+[layers/meta-practice/recipes-core/image/practice-image.bb]
+...
+# replace as 'layers/meta-customer/recipes-core/images/practice-image.bbappend'
+# IMAGE_INSTALL += "packagegroup-practice"
+...
+
+[layers/meta-customer]
+── conf
+│   └── layer.conf
+├── LICENSE
+├── README.md
+├── recipes-core
+│   ├── images
+│   │   └── practice-image.bbappend
+│   └── packagegroups
+│       └── packagegroup-practice.bbappend
+└── recipes-customer
+    ├── customer.bb
+    └── source
+        ├── COPYING
+        ├── customer.c
+        └── customer.service
+
+[layers/meta-customer/recipes-core/images/practice-image.bbappend]
+IMAGE_INSTALL += "packagegroup-practice"
+
+[layers/meta-customer/recipes-core/packagegroups/packagegroup-practice.bbappend]
+RDEPENDS:${PN} += "customer"
 ```
